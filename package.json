@@ -1,0 +1,18 @@
+{
+  "name": "qonto-mcp",
+  "version": "1.0.0",
+  "description": "Multi-organization MCP server for the Qonto business banking API (read-only)",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8"
+  }
+}
