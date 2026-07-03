@@ -180,11 +180,21 @@ export async function consolidatedBalances() {
         iban: a.iban,
         currency: a.currency,
         balance: a.balance,
+        balance_cents: a.balance_cents,
         authorized_balance: a.authorized_balance,
         status: a.status,
       }));
-      const total = accounts.reduce((s, a) => s + (a.balance || 0), 0);
-      out.push({ key, label, legal_name: organization.legal_name, total_balance: total, accounts });
+      const totalCents = accounts.reduce((s, a) => s + (a.balance_cents || 0), 0);
+      out.push({
+        key,
+        label,
+        legal_name: organization.legal_name,
+        currency: accounts[0]?.currency || 'EUR',
+        total_balance: totalCents / 100,
+        total_balance_cents: totalCents,
+        note: 'balance is in major units (e.g. euros); balance_cents is the integer cents value',
+        accounts,
+      });
     } catch (e) {
       out.push({ key, label, error: e.message });
     }
