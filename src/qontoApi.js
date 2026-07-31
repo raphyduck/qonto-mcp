@@ -154,19 +154,19 @@ export async function getAttachment(orgKey, id) {
 export async function listClientInvoices(orgKey, opts = {}) {
   const org = getOrg(orgKey);
   const { status, page = 1, per_page = 25 } = opts;
-  return request(org, '/client_invoices', { 'filter[status]': status, 'page[number]': page, 'page[size]': per_page });
+  return request(org, '/client_invoices', { 'filter[status]': status, current_page: page, per_page });
 }
 
 export async function listSupplierInvoices(orgKey, opts = {}) {
   const org = getOrg(orgKey);
   const { status, page = 1, per_page = 25 } = opts;
-  return request(org, '/supplier_invoices', { 'filter[status]': status, 'page[number]': page, 'page[size]': per_page });
+  return request(org, '/supplier_invoices', { 'filter[status]': status, current_page: page, per_page });
 }
 
 export async function listStatements(orgKey, opts = {}) {
   const org = getOrg(orgKey);
   const { bank_account_id, page = 1, per_page = 25 } = opts;
-  return request(org, '/statements', { 'bank_account_ids[]': bank_account_id, 'page[number]': page, 'page[size]': per_page });
+  return request(org, '/statements', { 'bank_account_ids[]': bank_account_id, current_page: page, per_page });
 }
 
 export async function consolidatedBalances() {

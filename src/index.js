@@ -175,6 +175,7 @@ server.tool(
     organization: orgParam,
     bank_account_id: z.string().optional(),
     page: z.number().int().min(1).optional(),
+    per_page: z.number().int().min(1).max(100).optional(),
   },
   async ({ organization, ...opts }) => {
     try {
