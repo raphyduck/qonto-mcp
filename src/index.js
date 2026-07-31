@@ -211,6 +211,79 @@ server.tool(
   }
 );
 
+// ---------- Write: attachments ----------
+
+server.tool(
+  'qonto_upload_attachment',
+  'Upload a receipt/justificatif (PDF, JPEG or PNG) and attach it to a transaction. The file is passed base64-encoded. This is a WRITE operation.',
+  {
+    organization: orgParam,
+    transaction_id: z.string().describe('The Qonto transaction UUID to attach the file to'),
+    file_base64: z.string().describe('The file content, base64-encoded (PDF, JPEG or PNG)'),
+    file_name: z.string().describe('File name with extension, e.g. "receipt.pdf" — used to infer the MIME type'),
+    content_type: z
+      .enum(['application/pdf', 'image/jpeg', 'image/png'])
+      .optional()
+      .describe('Override the MIME type when the file name has no clear extension'),
+    idempotency_key: z
+      .string()
+      .optional()
+      .describe('Optional; auto-generated if omitted. Reuse the same value to safely retry without duplicating the attachment.'),
+  },
+  async ({ organization, transaction_id, file_base64, file_name, content_type, idempotency_key }) => {
+    try {
+      return ok(
+        await qonto.uploadAttachmentToTransaction(organization, transaction_id, {
+          fileBase64: file_base64,
+          fileName: file_name,
+          contentType: content_type,
+          idempotencyKey: idempotency_key,
+        })
+      );
+    } catch (e) {
+      return fail(e);
+    }
+  }
+);
+
+server.tool(
+  'qonto_upload_attachment_from_file',
+  'Attach a receipt/justificatif to a transaction by reading it from a file already written on the shared bridge volume (default /srv/filemcp), instead of passing base64 inline. RELIABLE for any size: the bytes are read server-side and never transit the model, so large PDFs are not truncated. Typical flow: imap_download_attachment with savePath=/srv/filemcp/qonto-inbox/<name>.pdf, then call this tool with the same path. Returns size_bytes and sha256 for verification. Set dry_run=true to validate the file without uploading. WRITE operation.',
+  {
+    organization: orgParam,
+    transaction_id: z.string().describe('The Qonto transaction UUID to attach the file to'),
+    file_path: z.string().describe('Absolute path of the PDF/JPEG/PNG under the shared volume (e.g. /srv/filemcp/qonto-inbox/2026-07-31_legalplace.pdf)'),
+    file_name: z.string().optional().describe('Override the stored file name; defaults to the basename of file_path'),
+    content_type: z
+      .enum(['application/pdf', 'image/jpeg', 'image/png'])
+      .optional()
+      .describe('Override the MIME type when the file name has no clear extension'),
+    idempotency_key: z
+      .string()
+      .optional()
+      .describe('Optional; auto-generated if omitted. Reuse the same value to safely retry without duplicating the attachment.'),
+    dry_run: z
+      .boolean()
+      .optional()
+      .describe('If true, read and validate the file server-side (returns size_bytes + sha256) but do NOT upload to Qonto.'),
+  },
+  async ({ organization, transaction_id, file_path, file_name, content_type, idempotency_key, dry_run }) => {
+    try {
+      return ok(
+        await qonto.uploadAttachmentFromPath(organization, transaction_id, {
+          filePath: file_path,
+          fileName: file_name,
+          contentType: content_type,
+          idempotencyKey: idempotency_key,
+          dryRun: dry_run,
+        })
+      );
+    } catch (e) {
+      return fail(e);
+    }
+  }
+);
+
 // ---------- Startup ----------
 
 async function main() {

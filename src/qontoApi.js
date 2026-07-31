@@ -201,3 +201,165 @@ export async function consolidatedBalances() {
   }
   return out;
 }
+
+// ---------- Write: attachments ----------
+
+const ATTACHMENT_MIME_BY_EXT = {
+  pdf: 'application/pdf',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+};
+const ALLOWED_ATTACHMENT_MIME = new Set(['application/pdf', 'image/jpeg', 'image/png']);
+
+function resolveAttachmentType(fileName, contentType) {
+  if (contentType) return contentType;
+  const ext = (String(fileName).split('.').pop() || '').toLowerCase();
+  return ATTACHMENT_MIME_BY_EXT[ext] || null;
+}
+
+// Upload a receipt/justificatif and attach it to a transaction.
+// POST /transactions/{id}/attachments — multipart/form-data, field "file".
+// Requires the X-Qonto-Idempotency-Key header. PDF / JPEG / PNG only.
+export async function uploadAttachmentToTransaction(
+  orgKey,
+  transactionId,
+  { fileBase64, fileName, contentType, idempotencyKey } = {}
+) {
+  const org = getOrg(orgKey);
+  if (!transactionId) throw new Error('transactionId is required');
+  if (!fileBase64) throw new Error('fileBase64 (the file content, base64-encoded) is required');
+  if (!fileName) throw new Error('fileName is required, e.g. "receipt.pdf"');
+
+  const type = resolveAttachmentType(fileName, contentType);
+  if (!type) {
+    throw new Error(
+      `Cannot determine the file type of "${fileName}". Qonto accepts PDF, JPEG or PNG only; pass contentType explicitly when the extension is missing.`
+    );
+  }
+  if (!ALLOWED_ATTACHMENT_MIME.has(type)) {
+    throw new Error(`Unsupported type "${type}". Qonto accepts application/pdf, image/jpeg or image/png only.`);
+  }
+
+  const buffer = Buffer.from(fileBase64, 'base64');
+  if (!buffer.length) throw new Error('Decoded file is empty — check that fileBase64 is valid base64');
+
+  const idem = idempotencyKey || globalThis.crypto.randomUUID();
+
+  const form = new FormData();
+  form.append('file', new Blob([buffer], { type }), fileName);
+
+  const url = `${BASE_URL}/transactions/${transactionId}/attachments`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `${org.login}:${org.secret}`,
+      Accept: 'application/json',
+      'X-Qonto-Idempotency-Key': idem,
+    },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(
+      `Qonto API ${res.status} on POST /transactions/${transactionId}/attachments (org=${org.key}): ${body.slice(0, 500)}`
+    );
+  }
+
+  const text = await res.text().catch(() => '');
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
+
+  return {
+    ok: true,
+    status: res.status,
+    organization: org.key,
+    transaction_id: transactionId,
+    file_name: fileName,
+    content_type: type,
+    size_bytes: buffer.length,
+    idempotency_key: idem,
+    note: 'The file is processed in the background; it may take a few seconds to appear. Confirm with qonto_get_transaction (include_details: true).',
+    response: payload,
+  };
+}
+
+
+// ---------- Write: attachment from a file path (no inline base64) ----------
+// Reads the file server-side from the shared bridge volume and delegates to
+// uploadAttachmentToTransaction. Avoids routing large base64 through the model
+// layer (which silently truncated big PDFs). Confined to ATTACHMENT_FILE_ROOT.
+const ATTACHMENT_FILE_ROOT = process.env.QONTO_ATTACHMENT_ROOT || '/srv/filemcp';
+
+export async function uploadAttachmentFromPath(
+  orgKey,
+  transactionId,
+  { filePath, fileName, contentType, idempotencyKey, dryRun = false } = {}
+) {
+  if (!transactionId) throw new Error('transactionId is required');
+  if (!filePath) throw new Error('filePath is required (absolute path under ' + ATTACHMENT_FILE_ROOT + ')');
+
+  const { readFileSync, realpathSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+
+  let realRoot;
+  try {
+    realRoot = realpathSync(ATTACHMENT_FILE_ROOT);
+  } catch (e) {
+    throw new Error('Attachment root ' + ATTACHMENT_FILE_ROOT + ' is not accessible in this container: ' + e.message);
+  }
+  let real;
+  try {
+    real = realpathSync(filePath);
+  } catch (e) {
+    throw new Error('Cannot access filePath "' + filePath + '": ' + e.message);
+  }
+  if (real !== realRoot && !real.startsWith(realRoot + '/')) {
+    throw new Error('filePath must resolve inside ' + realRoot + ' (got "' + real + '")');
+  }
+
+  const buffer = readFileSync(real);
+  if (!buffer.length) throw new Error('File is empty - nothing to upload');
+
+  const name = fileName || real.split('/').pop();
+  const type = resolveAttachmentType(name, contentType);
+  if (!type) {
+    throw new Error('Cannot determine the file type of "' + name + '". Pass content_type explicitly (application/pdf, image/jpeg, image/png).');
+  }
+  if (!ALLOWED_ATTACHMENT_MIME.has(type)) {
+    throw new Error('Unsupported type "' + type + '". Qonto accepts application/pdf, image/jpeg or image/png only.');
+  }
+
+  const sha256 = createHash('sha256').update(buffer).digest('hex');
+
+  if (dryRun) {
+    return {
+      ok: true,
+      dry_run: true,
+      organization: orgKey,
+      transaction_id: transactionId,
+      source_path: real,
+      file_name: name,
+      content_type: type,
+      size_bytes: buffer.length,
+      sha256,
+      note: 'Dry run: file read and validated server-side; nothing was uploaded to Qonto.',
+    };
+  }
+
+  const result = await uploadAttachmentToTransaction(orgKey, transactionId, {
+    fileBase64: buffer.toString('base64'),
+    fileName: name,
+    contentType: type,
+    idempotencyKey,
+  });
+
+  return { ...result, source_path: real, sha256, size_bytes: buffer.length };
+}

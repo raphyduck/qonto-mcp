@@ -4,3 +4,6 @@ node_modules/
 !.env.example
 *.bak
 *.bak.*
+
+# Sauvegardes datées des patchs appliqués en direct sur l hote
+*.bak-*
